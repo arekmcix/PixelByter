@@ -1,0 +1,56 @@
+import logging
+import os
+from PIL import Image
+from PIL.ExifTags import TAGS
+import csv
+from datetime import datetime
+
+def get_metadata(image_path):
+    try:
+        image = Image.open(image_path)
+        image_info = image._getexif()
+
+        if image_info:
+            metadata = {TAGS.get(key): value for key, value in image_info.items()}
+            return metadata
+        else:
+            return {}
+    except Exception as e:
+        logging.error(f"Error retrieving metadata for {image_path}: {e}")
+        return {}
+
+def create_report_entry(file_name, metadata, file_path):
+    return [file_name, metadata.get('DateTimeOriginal', 'Unknown'), f"{os.path.getsize(file_path) / (1024 * 1024):.2f} MB", metadata.get('Make', 'Unknown'), metadata.get('Model', 'Unknown'), f"{metadata.get('ExifImageWidth', 'Unknown')} x {metadata.get('ExifImageHeight', 'Unknown')}", file_path]
+
+def generate_report(source_directory):
+    report_entries = []
+    report_file_name = f"PixelByter-Scan-Source-Report-{datetime.now().strftime('%Y-%m-%d')}.csv"
+    desktop_path = os.path.expanduser("~/Desktop")
+    report_file_path = os.path.join(desktop_path, report_file_name)
+
+    for root, dirs, files in os.walk(source_directory):
+        for file in files:
+            if file.lower().endswith((".jpg", ".jpeg")):
+                file_path = os.path.join(root, file)
+
+                try:
+                    metadata = get_metadata(file_path)
+                    report_entry = create_report_entry(file, metadata, file_path)
+                    report_entries.append(report_entry)
+                    logging.info(f"Processed: {file_path}")
+                except Exception as e:
+                    logging.error(f"Error processing {file_path}: {e}")
+
+    if report_entries:
+        with open(report_file_path, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(['File Name', 'Date Taken', 'Size (MB)', 'Camera Maker', 'Camera Model', 'Dimensions', 'Full Path'])
+            writer.writerows(report_entries)
+
+    logging.info("Report generation completed.")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+source_directory = 'D:/'
+
+generate_report(source_directory)
