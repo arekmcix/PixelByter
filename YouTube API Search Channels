@@ -1,0 +1,78 @@
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+import datetime
+import html  # Importing html module for decoding
+
+def get_authenticated_service():
+    flow = InstalledAppFlow.from_client_secrets_file(
+        'C:/Users/Arkadiusz/Downloads/your-client_secret.apps.googleusercontent.com.json', 
+        scopes=['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/spreadsheets'])
+    credentials = flow.run_local_server()
+    return build('youtube', 'v3', credentials=credentials), build('sheets', 'v4', credentials=credentials)
+
+def fetch_youtube_data(youtube_service, query):
+    days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=2000)
+    published_after = days_ago.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    channel_videos_count = {}
+    rows = []
+    page_token = None
+
+    while len(rows) < 100:  # Changed from 50 to 100
+        response = youtube_service.search().list(
+            part='snippet', q=query, type='video', maxResults=50, pageToken=page_token,
+            publishedAfter=published_after, relevanceLanguage='en'
+        ).execute()
+
+        for item in response['items']:
+            channel_id = item['snippet']['channelId']
+            channel_title = html.unescape(item['snippet']['channelTitle'])
+
+            channel_videos_count.setdefault(channel_id, 0)
+            channel_videos_count[channel_id] += 1
+
+            if channel_videos_count[channel_id] < 3:
+                continue
+
+            if channel_id not in [row[0] for row in rows]:
+                channel_response = youtube_service.channels().list(part='statistics', id=channel_id).execute()
+                if channel_response['items']:
+                    channel_info = channel_response['items'][0]['statistics']
+                    subscriber_count = int(channel_info.get('subscriberCount', 0))
+                    videos_count = int(channel_info.get('videoCount', 0))
+                    channel_url = f'https://www.youtube.com/channel/{channel_id}'
+
+                    rows.append([channel_id, channel_title, subscriber_count, videos_count, channel_url])
+
+            if len(rows) >= 100:  # Changed from 50 to 100
+                break
+
+        page_token = response.get('nextPageToken')
+        if not page_token or len(rows) >= 100:  # Changed from 50 to 100
+            break
+
+    rows = sorted(rows, key=lambda x: x[2], reverse=True)[:100]  # Changed from 50 to 100
+    return rows
+
+def update_sheet(sheets_service, spreadsheet_id, data):
+    headers = ['Channel ID', 'Channel Title', 'Subscriber Count', 'Videos Count', 'Channel URL']
+    data.insert(0, headers)
+    
+    sheet = sheets_service.spreadsheets()
+    update_body = {'values': data}
+    result = sheet.values().update(
+        spreadsheetId=spreadsheet_id, range='Sheet 1',
+        valueInputOption='RAW', body=update_body
+    ).execute()
+    print('Sheet updated: ', result)
+
+def main():
+    query = 'Davos'  # Modify this query as needed to broaden the search
+    SPREADSHEET_ID = 'your-google-sheets-id'
+
+    youtube_service, sheets_service = get_authenticated_service()
+    youtube_data = fetch_youtube_data(youtube_service, query)
+    update_sheet(sheets_service, SPREADSHEET_ID, youtube_data)
+
+if __name__ == '__main__':
+    main()
