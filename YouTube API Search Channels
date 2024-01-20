@@ -11,10 +11,9 @@ def get_authenticated_service():
     return build('youtube', 'v3', credentials=credentials), build('sheets', 'v4', credentials=credentials)
 
 def fetch_youtube_data(youtube_service, query):
-    days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
+    days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
     published_after = days_ago.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    channel_videos_count = {}
     unique_channels = set()
     rows = []
     page_token = None
@@ -27,25 +26,20 @@ def fetch_youtube_data(youtube_service, query):
 
         for item in response['items']:
             channel_id = item['snippet']['channelId']
-            channel_title = html.unescape(item['snippet']['channelTitle'])
-
-            channel_videos_count.setdefault(channel_id, 0)
-            channel_videos_count[channel_id] += 1
-
-            if channel_videos_count[channel_id] < 5:
+            if channel_id in unique_channels:
                 continue
 
-            if channel_id not in unique_channels:
-                unique_channels.add(channel_id)
+            channel_title = html.unescape(item['snippet']['channelTitle'])
+            unique_channels.add(channel_id)
 
-                channel_response = youtube_service.channels().list(part='statistics', id=channel_id).execute()
-                if channel_response['items']:
-                    channel_info = channel_response['items'][0]['statistics']
-                    subscriber_count = int(channel_info.get('subscriberCount', 0))
-                    videos_count = int(channel_info.get('videoCount', 0))
-                    channel_url = f'https://www.youtube.com/channel/{channel_id}'
+            channel_response = youtube_service.channels().list(part='statistics', id=channel_id).execute()
+            if channel_response['items']:
+                channel_info = channel_response['items'][0]['statistics']
+                subscriber_count = int(channel_info.get('subscriberCount', 0))
+                videos_count = int(channel_info.get('videoCount', 0))
+                channel_url = f'https://www.youtube.com/channel/{channel_id}'
 
-                    rows.append([channel_id, channel_title, subscriber_count, videos_count, channel_url])
+                rows.append([channel_id, channel_title, subscriber_count, videos_count, channel_url])
 
             if len(rows) >= 100:
                 break
@@ -71,7 +65,7 @@ def update_sheet(sheets_service, spreadsheet_id, data):
 
 def main():
     query = 'Davos'  # Modify this query as needed
-    SPREADSHEET_ID = '1eMLgKWMAA-t7MHqN4ebIY8TlbZDzapNpMwOYy2WXHM'
+    SPREADSHEET_ID = '1eMLgKWMAA-t7MHqN4eIY8TlbZDzapNpMwOYy2WXHM'
 
     youtube_service, sheets_service = get_authenticated_service()
     youtube_data = fetch_youtube_data(youtube_service, query)
@@ -79,4 +73,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
