@@ -2,8 +2,6 @@ from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 import datetime
 import html  # Importing html module for decoding
-import os
-import pytz  # For handling time zones
 
 def get_authenticated_service():
     flow = InstalledAppFlow.from_client_secrets_file(
@@ -13,61 +11,67 @@ def get_authenticated_service():
     return build('youtube', 'v3', credentials=credentials), build('sheets', 'v4', credentials=credentials)
 
 def fetch_youtube_data(youtube_service, query):
-    days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)
+    days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
     published_after = days_ago.strftime('%Y-%m-%dT%H:%M:%SZ')
 
+    channel_videos_count = {}
+    unique_channels = set()
     rows = []
-    next_page_token = None
-    max_results = 100
+    page_token = None
 
-    while len(rows) < max_results:
+    while len(rows) < 100:
         response = youtube_service.search().list(
-            part='snippet',
-            q=query,
-            type='video',
-            maxResults=50,  # API maximum
-            pageToken=next_page_token,
-            publishedAfter=published_after,
-            relevanceLanguage='en'
+            part='snippet', q=query, type='video', maxResults=50, pageToken=page_token,
+            publishedAfter=published_after, relevanceLanguage='en'
         ).execute()
 
         for item in response['items']:
-            video_id = item['id']['videoId']
+            channel_id = item['snippet']['channelId']
             channel_title = html.unescape(item['snippet']['channelTitle'])
-            video_title = html.unescape(item['snippet']['title'])
-            published_date = item['snippet']['publishedAt'][:10]
-            video_url = f'https://www.youtube.com/watch?v={video_id}'
 
-            video_response = youtube_service.videos().list(part='statistics', id=video_id).execute()
-            view_count = int(video_response['items'][0]['statistics'].get('viewCount', 0))
+            channel_videos_count.setdefault(channel_id, 0)
+            channel_videos_count[channel_id] += 1
 
-            rows.append([channel_title, video_title, published_date, view_count, video_url])
+            if channel_videos_count[channel_id] < 5:
+                continue
 
-            if len(rows) >= max_results:
+            if channel_id not in unique_channels:
+                unique_channels.add(channel_id)
+
+                channel_response = youtube_service.channels().list(part='statistics', id=channel_id).execute()
+                if channel_response['items']:
+                    channel_info = channel_response['items'][0]['statistics']
+                    subscriber_count = int(channel_info.get('subscriberCount', 0))
+                    videos_count = int(channel_info.get('videoCount', 0))
+                    channel_url = f'https://www.youtube.com/channel/{channel_id}'
+
+                    rows.append([channel_id, channel_title, subscriber_count, videos_count, channel_url])
+
+            if len(rows) >= 100:
                 break
 
-        next_page_token = response.get('nextPageToken')
-        if not next_page_token:
-            break  # Exit loop if no more pages
+        page_token = response.get('nextPageToken')
+        if not page_token or len(rows) >= 100:
+            break
 
-    rows = sorted(rows, key=lambda x: x[3], reverse=True)
+    rows = sorted(rows, key=lambda x: x[2], reverse=True)[:100]
     return rows
 
 def update_sheet(sheets_service, spreadsheet_id, data):
-    headers = ['Channel Title', 'Video Title', 'Published Date', 'View Count', 'Video URL']
+    headers = ['Channel ID', 'Channel Title', 'Subscriber Count', 'Videos Count', 'Channel URL']
     data.insert(0, headers)
     
     sheet = sheets_service.spreadsheets()
     update_body = {'values': data}
     result = sheet.values().update(
-        spreadsheetId=spreadsheet_id, range='Days',
+        spreadsheetId=spreadsheet_id, range='Channels',
         valueInputOption='RAW', body=update_body
     ).execute()
     print('Sheet updated: ', result)
 
 def main():
-    query = 'Davos'  # Replace with your search query
-    SPREADSHEET_ID = '1eMLgKWMAA-t7MHqN4eebIY8TlbZDMwOYy2WXHM'
+    query = 'Davos'  # Modify this query as needed
+    SPREADSHEET_ID = '1eMLgKWMAA-t7MHqN4ebIY8TlbZDzapNpMwOYy2WXHM'
 
     youtube_service, sheets_service = get_authenticated_service()
     youtube_data = fetch_youtube_data(youtube_service, query)
@@ -75,3 +79,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
